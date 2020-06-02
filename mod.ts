@@ -1,14 +1,22 @@
 export type IndexObject = { [key: string]: string };
 
 export const loadEnv = async (): Promise<void> => {
+  let fileData: Uint8Array | null = null;
   try {
-    const fileData = await Deno.readFile("./.env");
-    const decoder = new TextDecoder("utf-8");
-    const content = decoder.decode(fileData);
-    return attachVariablesToEnv(content);
+    fileData = await Deno.readFile("./.env");
   } catch (_error) {
     throw new Error(".env file was not found");
   }
+
+  if (fileData !== null) {
+    processFileData(fileData);
+  }
+};
+
+const processFileData = (fileData: Uint8Array): void => {
+  const decoder = new TextDecoder("utf-8");
+  const content = decoder.decode(fileData);
+  return attachVariablesToEnv(content);
 };
 
 const attachVariablesToEnv = (
@@ -20,23 +28,25 @@ const attachVariablesToEnv = (
   }
 };
 
+const expandVariables = (parsedContent: IndexObject, value: string): string => {
+  const IS_VARIABLE_REGEXP = /(.?\${?(?:[a-zA-Z0-9_]+)?}?)/g;
+
+  return (value.match(IS_VARIABLE_REGEXP) || [])
+    .reduce((accumulator: string, currentValue: string): string => {
+      const IS_VARIABLE_GROUP_REGEXP = /(.?)\${?([a-zA-Z0-9_]+)?}?/g;
+
+      const [match, delimitator, matchedKey] =
+        IS_VARIABLE_GROUP_REGEXP.exec(currentValue) || [];
+
+      let value = parsedContent[matchedKey || ""];
+      value = expandVariables(parsedContent, value);
+      return accumulator.replace(match.substring(delimitator.length), value);
+    }, value);
+};
+
 const expandContent = (parsedContent: IndexObject): void => {
-  const VARIABLE_REGEXP = /(.?\${?(?:[a-zA-Z0-9_]+)?}?)/g;
-
   for (let [key, value] of Object.entries(parsedContent)) {
-    if (value.match(VARIABLE_REGEXP)) {
-      value = value.replace("$", "");
-
-      const matchedKey = Object
-        .keys(parsedContent)
-        .find((objectKey): boolean => {
-          return objectKey === value;
-        });
-
-      if (typeof matchedKey !== "undefined") {
-        parsedContent[key] = parsedContent[matchedKey];
-      }
-    }
+    parsedContent[key] = expandVariables(parsedContent, value);
   }
 };
 
